@@ -1,10 +1,13 @@
 package com.example.digitalsignchecker.domain.model;
 
+import com.example.digitalsignchecker.domain.enums.DocumentStatus;
 import com.example.digitalsignchecker.domain.enums.DocumentType;
+import jakarta.persistence.Basic;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.EnumType;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -30,8 +33,13 @@ public class Document {
     @Column(nullable = false)
     private DocumentType type;
 
-    @Lob
     @Column(nullable = false)
+    @Enumerated(EnumType.STRING)
+    private DocumentStatus status;
+
+    @Lob
+    @Basic(fetch = FetchType.EAGER)
+    @Column(columnDefinition = "LONGBLOB", nullable = false)
     private byte[] content;
 
     @Column(nullable = false, updatable = false)
@@ -43,6 +51,7 @@ public class Document {
         this.uuid = UUID.randomUUID();
         this.filename = filename;
         this.type = type;
+        this.status = DocumentStatus.PENDING;
         this.content = content;
         this.uploadedAt = Instant.now();
     }
