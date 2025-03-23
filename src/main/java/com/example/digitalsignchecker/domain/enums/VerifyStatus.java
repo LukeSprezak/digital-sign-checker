@@ -1,5 +1,5 @@
 package com.example.digitalsignchecker.domain.enums;
 
-public enum VerificationStatus {
+public enum VerifyStatus {
     PENDING, IN_PROGRESS, COMPLETED, ERROR
 }

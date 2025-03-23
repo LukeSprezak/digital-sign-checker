@@ -1,6 +1,6 @@
 package com.example.digitalsignchecker.domain.model;
 
-import com.example.digitalsignchecker.domain.enums.VerificationStatus;
+import com.example.digitalsignchecker.domain.enums.VerifyStatus;
 import jakarta.persistence.*;
 
 import java.time.Instant;
@@ -22,7 +22,7 @@ public class VerifyResult {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    private VerificationStatus status;
+    private VerifyStatus status;
 
     @Column(nullable = false)
     private boolean verified;
@@ -35,7 +35,7 @@ public class VerifyResult {
 
     public VerifyResult() {}
 
-    public VerifyResult(Document document, VerificationStatus status, boolean verified, String message) {
+    public VerifyResult(Document document, VerifyStatus status, boolean verified, String message) {
         this.uuid = UUID.randomUUID();
         this.document = document;
         this.status = status;
@@ -44,7 +44,7 @@ public class VerifyResult {
         this.verificationTime = Instant.now();
     }
 
-    public void updateStatus(VerificationStatus status, boolean verified, String message) {
+    public void updateStatus(VerifyStatus status, boolean verified, String message) {
         this.status = status;
         this.verified = verified;
         this.message = message;
@@ -72,7 +72,7 @@ public class VerifyResult {
         return document;
     }
 
-    public VerificationStatus getStatus() {
+    public VerifyStatus getStatus() {
         return status;
     }
 
@@ -92,7 +92,7 @@ public class VerifyResult {
         this.uuid = uuid;
     }
 
-    public void setStatus(VerificationStatus status) {
+    public void setStatus(VerifyStatus status) {
         this.status = status;
     }
 }

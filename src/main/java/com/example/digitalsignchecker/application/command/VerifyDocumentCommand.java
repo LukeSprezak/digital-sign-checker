@@ -7,6 +7,5 @@ import java.util.UUID;
 public record VerifyDocumentCommand(
         UUID uuid,
         DocumentType type,
-        byte[] data,
-        String callbackUrl
+        byte[] data
 ) {}

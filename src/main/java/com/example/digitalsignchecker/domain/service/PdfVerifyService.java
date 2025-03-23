@@ -4,10 +4,10 @@ import com.example.digitalsignchecker.application.dto.VerifyResultDTO;
 import org.springframework.stereotype.Service;
 
 @Service
-public class XmlVerificationService implements DocumentVerificationStrategy {
+public class PdfVerifyService implements DocumentVerifyStrategy {
 
     @Override
     public VerifyResultDTO verifyDocument(byte[] document) {
-        return VerifyResultDTO.fromVerification(false, "Valid PDF signature");
+        return null;
     }
 }

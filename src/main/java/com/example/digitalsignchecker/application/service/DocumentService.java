@@ -5,13 +5,13 @@ import com.example.digitalsignchecker.application.command.handler.VerifyDocument
 import com.example.digitalsignchecker.application.dto.VerifyResultDTO;
 import com.example.digitalsignchecker.domain.enums.DocumentStatus;
 import com.example.digitalsignchecker.domain.enums.DocumentType;
-import com.example.digitalsignchecker.domain.enums.VerificationStatus;
+import com.example.digitalsignchecker.domain.enums.VerifyStatus;
 import com.example.digitalsignchecker.domain.exception.DocumentNotFoundException;
 import com.example.digitalsignchecker.domain.exception.VerificationNotFoundException;
 import com.example.digitalsignchecker.domain.model.Document;
 import com.example.digitalsignchecker.domain.model.VerifyResult;
 import com.example.digitalsignchecker.infrastructure.persistence.DocumentRepository;
-import com.example.digitalsignchecker.infrastructure.persistence.VerificationRepository;
+import com.example.digitalsignchecker.infrastructure.persistence.VerifyRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -30,12 +30,12 @@ public class DocumentService {
     private static final String XML_EXTENSION = ".xml";
 
     private final DocumentRepository documentRepository;
-    private final VerificationRepository verificationRepository;
+    private final VerifyRepository verificationRepository;
     private final VerifyDocumentHandler verifyDocumentHandler;
 
     public DocumentService(
             DocumentRepository documentRepository,
-            VerificationRepository verificationRepository,
+            VerifyRepository verificationRepository,
             VerifyDocumentHandler verifyDocumentHandler
     ) {
         this.documentRepository = documentRepository;
@@ -75,8 +75,7 @@ public class DocumentService {
         VerifyDocumentCommand command = new VerifyDocumentCommand(
                 document.getUuid(),
                 document.getType(),
-                document.getContent(),
-                null
+                document.getContent()
         );
 
         URI location = URI.create("/api/documents/status/" + document.getUuid());
@@ -100,7 +99,7 @@ public class DocumentService {
     }
 
     private void updateDocumentStatus(Document document, VerifyResult verifyResult) {
-        if (!EnumSet.of(VerificationStatus.COMPLETED, VerificationStatus.ERROR).contains(verifyResult.getStatus())) {
+        if (!EnumSet.of(VerifyStatus.COMPLETED, VerifyStatus.ERROR).contains(verifyResult.getStatus())) {
             return;
         }
 

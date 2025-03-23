@@ -4,6 +4,6 @@ import com.example.digitalsignchecker.application.dto.VerifyResultDTO;
 import org.springframework.stereotype.Component;
 
 @Component
-public interface DocumentVerificationStrategy {
+public interface DocumentVerifyStrategy {
     VerifyResultDTO verifyDocument(byte[] document);
 }

@@ -3,20 +3,18 @@ package com.example.digitalsignchecker.application.command.handler;
 import com.example.digitalsignchecker.application.command.VerifyDocumentCommand;
 import com.example.digitalsignchecker.application.dto.VerifyResultDTO;
 import com.example.digitalsignchecker.domain.enums.DocumentType;
-import com.example.digitalsignchecker.domain.enums.VerificationStatus;
+import com.example.digitalsignchecker.domain.enums.VerifyStatus;
 import com.example.digitalsignchecker.domain.model.Document;
 import com.example.digitalsignchecker.domain.model.VerifyResult;
-import com.example.digitalsignchecker.domain.service.DocumentVerificationStrategy;
-import com.example.digitalsignchecker.domain.service.PdfVerificationService;
-import com.example.digitalsignchecker.domain.service.XmlVerificationService;
+import com.example.digitalsignchecker.domain.service.DocumentVerifyStrategy;
+import com.example.digitalsignchecker.domain.service.PdfVerifyService;
+import com.example.digitalsignchecker.domain.service.XmlVerifyService;
 import com.example.digitalsignchecker.infrastructure.persistence.DocumentRepository;
-import com.example.digitalsignchecker.infrastructure.persistence.VerificationRepository;
+import com.example.digitalsignchecker.infrastructure.persistence.VerifyRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
 
 import java.util.List;
 import java.util.Map;
@@ -28,23 +26,18 @@ import java.util.stream.Collectors;
 public class VerifyDocumentHandler {
 
     private static final Logger logger = LoggerFactory.getLogger(VerifyDocumentHandler.class);
-    private final VerificationRepository verificationRepository;
+    private final VerifyRepository verifyRepository;
     private final DocumentRepository documentRepository;
-    private final Map<DocumentType, DocumentVerificationStrategy> verificationStrategies;
+    private final Map<DocumentType, DocumentVerifyStrategy> verifyStrategy;
 
-    @Autowired
-    public VerifyDocumentHandler(VerificationRepository verificationRepository, DocumentRepository documentRepository, List<DocumentVerificationStrategy> strategies) {
-        this.verificationRepository = verificationRepository;
+    public VerifyDocumentHandler(
+            VerifyRepository verifyRepository,
+            DocumentRepository documentRepository,
+            List<DocumentVerifyStrategy> strategies
+    ) {
+        this.verifyRepository = verifyRepository;
         this.documentRepository = documentRepository;
-        this.verificationStrategies = strategies.stream()
-                .collect(Collectors.toMap(strategy -> {
-                    if (strategy instanceof PdfVerificationService) {
-                        return DocumentType.PDF;
-                    } else if (strategy instanceof XmlVerificationService) {
-                        return DocumentType.XML;
-                    }
-                    throw new IllegalArgumentException("Unknown verification strategy: " + strategy.getClass());
-                }, strategy -> strategy));
+        this.verifyStrategy = beginStrategy(strategies);
     }
 
     @Async
@@ -53,44 +46,61 @@ public class VerifyDocumentHandler {
         Document document = documentRepository.findByUuid(documentId)
                 .orElseThrow(() -> new IllegalArgumentException("Document not found with id: " + documentId));
 
-        VerifyResult verifyResult = new VerifyResult(document, VerificationStatus.PENDING, false, "Processing started");
-        verificationRepository.save(verifyResult);
+        VerifyResult verifyResult = saveInitialVerify(document);
 
-        return CompletableFuture.supplyAsync(() -> {
-            DocumentVerificationStrategy strategy = verificationStrategies.get(command.type());
-            if (strategy == null) {
-                throw new IllegalArgumentException("Unsupported document type: " + command.type());
-            }
-
-            verifyResult.updateStatus(VerificationStatus.IN_PROGRESS, false, "Verification in progress");
-            verificationRepository.save(verifyResult);
-
-            VerifyResultDTO resultDTO = strategy.verifyDocument(command.data());
-
-            VerificationStatus finalStatus = resultDTO.verified() ? VerificationStatus.COMPLETED : VerificationStatus.ERROR;
-            verifyResult.updateStatus(finalStatus, resultDTO.verified(), resultDTO.message());
-            verificationRepository.save(verifyResult);
-
-            if (command.callbackUrl() != null && !command.callbackUrl().isEmpty()) {
-                sendCallback(command.callbackUrl(), resultDTO);
-            }
-
-            return resultDTO;
-        }).exceptionally(exception -> {
-            verifyResult.updateStatus(VerificationStatus.ERROR, false, "ERROR: " + exception.getMessage());
-            verificationRepository.save(verifyResult);
-
-            return VerifyResultDTO.fromEntity(verifyResult);
-        });
+        return CompletableFuture
+                .supplyAsync(() -> processVerify(command, verifyResult))
+                .exceptionally(exception -> handleVerifyError(verifyResult, exception));
     }
 
-    private void sendCallback(String callbackUrl, VerifyResultDTO resultDTO) {
-        RestTemplate restTemplate = new RestTemplate();
-        try {
-            logger.info("Sending callback to {}", callbackUrl);
-            restTemplate.postForEntity(callbackUrl, resultDTO, Void.class);
-        } catch (Exception exception) {
-            logger.error("Failed to send callback to {}: {}", callbackUrl, exception.getMessage());
+    private VerifyResult saveInitialVerify(Document document) {
+        VerifyResult verifyResult = new VerifyResult(document, VerifyStatus.PENDING, false, "Begin processing");
+        return verifyRepository.save(verifyResult);
+    }
+
+    private VerifyResultDTO processVerify(VerifyDocumentCommand command, VerifyResult verifyResult) {
+        DocumentVerifyStrategy strategy = verifyStrategy.get(command.type());
+        if (strategy == null) {
+            throw new IllegalArgumentException("Unsupported document type: " + command.type());
         }
+
+        updateVerifyStatus(verifyResult, VerifyStatus.IN_PROGRESS, "Verify in progress");
+
+        VerifyResultDTO resultDTO = strategy.verifyDocument(command.data());
+        VerifyStatus finalStatus = resultDTO.verified()
+                ? VerifyStatus.COMPLETED
+                : VerifyStatus.ERROR;
+
+        updateVerifyStatus(verifyResult, finalStatus, resultDTO.message());
+
+        return resultDTO;
+    }
+
+    private void updateVerifyStatus(VerifyResult verifyResult, VerifyStatus status, String message) {
+        if (!verifyResult.getStatus().equals(status)) {
+            verifyResult.updateStatus(status, status == VerifyStatus.COMPLETED, message);
+            verifyRepository.save(verifyResult);
+        }
+    }
+
+    private VerifyResultDTO handleVerifyError(VerifyResult verifyResult, Throwable exception) {
+        String errorMessage = "ERROR: " + (exception.getMessage() != null ? exception.getMessage() : "Unknown error");
+        logger.error("Verify failed: {}", errorMessage);
+
+        updateVerifyStatus(verifyResult, VerifyStatus.ERROR, errorMessage);
+        return VerifyResultDTO.fromEntity(verifyResult);
+    }
+
+    private Map<DocumentType, DocumentVerifyStrategy> beginStrategy(List<DocumentVerifyStrategy> strategies) {
+        return strategies.stream()
+                .collect(Collectors.toMap(this::strategyDocumentType, strategy -> strategy));
+    }
+
+    private DocumentType strategyDocumentType(DocumentVerifyStrategy strategy) {
+        return switch (strategy) {
+            case PdfVerifyService ignored -> DocumentType.PDF;
+            case XmlVerifyService ignored -> DocumentType.XML;
+            default -> throw new IllegalArgumentException("Unknown verify strategy: " + strategy.getClass());
+        };
     }
 }

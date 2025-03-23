@@ -1,6 +1,6 @@
 package com.example.digitalsignchecker.application.dto;
 
-import com.example.digitalsignchecker.domain.enums.VerificationStatus;
+import com.example.digitalsignchecker.domain.enums.VerifyStatus;
 import com.example.digitalsignchecker.domain.model.VerifyResult;
 
 import java.time.Instant;
@@ -8,7 +8,7 @@ import java.util.UUID;
 
 public record VerifyResultDTO(
         UUID uuid,
-        VerificationStatus status,
+        VerifyStatus status,
         boolean verified,
         String message,
         Instant verificationTime,
@@ -38,7 +38,7 @@ public record VerifyResultDTO(
     ) {
         return new VerifyResultDTO(
                 UUID.randomUUID(),
-                verified ? VerificationStatus.COMPLETED : VerificationStatus.ERROR,
+                verified ? VerifyStatus.COMPLETED : VerifyStatus.ERROR,
                 verified,
                 message,
                 Instant.now(),
