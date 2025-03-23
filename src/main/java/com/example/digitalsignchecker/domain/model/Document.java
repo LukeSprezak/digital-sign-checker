@@ -4,7 +4,6 @@ import com.example.digitalsignchecker.domain.enums.DocumentStatus;
 import com.example.digitalsignchecker.domain.enums.DocumentType;
 import jakarta.persistence.*;
 
-
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;

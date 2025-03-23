@@ -9,5 +9,6 @@ import java.util.List;
 
 @Repository
 public interface SignatureRepository extends JpaRepository<Signature, Long> {
+
     List<Signature> findByDocument(Document document);
 }
