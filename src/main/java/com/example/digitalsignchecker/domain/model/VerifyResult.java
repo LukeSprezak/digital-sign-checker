@@ -16,6 +16,10 @@ public class VerifyResult {
     @Column(nullable = false, unique = true, updatable = false)
     private UUID uuid;
 
+    @ManyToOne(fetch = FetchType.LAZY, cascade = CascadeType.ALL)
+    @JoinColumn(name = "document_id", nullable = false)
+    private Document document;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private VerificationStatus status;
@@ -23,7 +27,7 @@ public class VerifyResult {
     @Column(nullable = false)
     private boolean verified;
 
-    @Column(nullable = false)
+    @Column(nullable = false, columnDefinition = "TEXT")
     private String message;
 
     @Column(nullable = false, updatable = false)
@@ -31,9 +35,10 @@ public class VerifyResult {
 
     public VerifyResult() {}
 
-    public VerifyResult(boolean verified, String message) {
+    public VerifyResult(Document document, VerificationStatus status, boolean verified, String message) {
         this.uuid = UUID.randomUUID();
-        this.status = verified ? VerificationStatus.COMPLETED : VerificationStatus.ERROR;
+        this.document = document;
+        this.status = status;
         this.verified = verified;
         this.message = message;
         this.verificationTime = Instant.now();
@@ -63,6 +68,10 @@ public class VerifyResult {
         return uuid;
     }
 
+    public Document getDocument() {
+        return document;
+    }
+
     public VerificationStatus getStatus() {
         return status;
     }
@@ -77,6 +86,10 @@ public class VerifyResult {
 
     public Instant getVerificationTime() {
         return verificationTime;
+    }
+
+    public void setUuid(UUID uuid) {
+        this.uuid = uuid;
     }
 
     public void setStatus(VerificationStatus status) {

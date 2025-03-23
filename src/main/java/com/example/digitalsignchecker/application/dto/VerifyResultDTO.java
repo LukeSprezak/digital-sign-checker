@@ -11,7 +11,10 @@ public record VerifyResultDTO(
         VerificationStatus status,
         boolean verified,
         String message,
-        Instant verificationTime
+        Instant verificationTime,
+        String signerName,
+        String certificateIssuer,
+        Instant signingTime
 ) {
     public static VerifyResultDTO fromEntity(VerifyResult entity) {
         return new VerifyResultDTO(
@@ -19,17 +22,29 @@ public record VerifyResultDTO(
                 entity.getStatus(),
                 entity.isVerified(),
                 entity.getMessage(),
-                entity.getVerificationTime()
+                entity.getVerificationTime(),
+                null,
+                null,
+                null
         );
     }
 
-    public static VerifyResultDTO fromVerification(boolean verified, String message) {
+    public static VerifyResultDTO fromVerification(
+            boolean verified,
+            String message,
+            String signerName,
+            String certificateIssuer,
+            Instant signingTime
+    ) {
         return new VerifyResultDTO(
                 UUID.randomUUID(),
                 verified ? VerificationStatus.COMPLETED : VerificationStatus.ERROR,
                 verified,
                 message,
-                Instant.now()
+                Instant.now(),
+                signerName,
+                certificateIssuer,
+                signingTime
         );
     }
 }

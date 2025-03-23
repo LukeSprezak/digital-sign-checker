@@ -1,5 +1,6 @@
 package com.example.digitalsignchecker.infrastructure.persistence;
 
+import com.example.digitalsignchecker.domain.model.Document;
 import com.example.digitalsignchecker.domain.model.VerifyResult;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
@@ -11,4 +12,5 @@ import java.util.UUID;
 public interface VerificationRepository extends JpaRepository<VerifyResult, Long> {
 
     Optional<VerifyResult> findByUuid(UUID uuid);
+    Optional<VerifyResult> findByDocument(Document document);
 }

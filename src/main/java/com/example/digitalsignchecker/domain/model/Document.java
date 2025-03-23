@@ -24,7 +24,7 @@ public class Document {
     private Long id;
 
     @Column(nullable = false, unique = true, updatable = false)
-    private UUID uuid;
+    private UUID uuid = UUID.randomUUID();
 
     @Column(nullable = false)
     private String filename;
@@ -45,15 +45,18 @@ public class Document {
     @Column(nullable = false, updatable = false)
     private Instant uploadedAt;
 
+    @Column(nullable = false)
+    private boolean deleted;
+
     public Document() {}
 
-    public Document(String filename, DocumentType type, byte[] content) {
-        this.uuid = UUID.randomUUID();
+    public Document(String filename, DocumentType documentType, byte[] fileBytes) {
         this.filename = filename;
-        this.type = type;
+        this.type = documentType;
+        this.content = fileBytes;
         this.status = DocumentStatus.PENDING;
-        this.content = content;
         this.uploadedAt = Instant.now();
+        this.deleted = false;
     }
 
     public Long getId() {
@@ -78,5 +81,21 @@ public class Document {
 
     public Instant getUploadedAt() {
         return uploadedAt;
+    }
+
+    public DocumentStatus getStatus() {
+        return status;
+    }
+
+    public boolean isDeleted() {
+        return deleted;
+    }
+
+    public void setStatus(DocumentStatus status) {
+        this.status = status;
+    }
+
+    public void setDeleted(boolean deleted) {
+        this.deleted = deleted;
     }
 }

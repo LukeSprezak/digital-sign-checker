@@ -11,5 +11,4 @@ import java.util.UUID;
 public interface DocumentRepository extends JpaRepository<Document, Long> {
 
     Optional<Document> findByUuid(UUID uuid);
-    void deleteByUuid(UUID uuid);
 }
