@@ -1,6 +1,7 @@
-package com.example.digitalsignchecker.domain.service;
+package com.example.digitalsignchecker.application.service.strategy;
 
 import com.example.digitalsignchecker.application.dto.VerifyResultDTO;
+import com.example.digitalsignchecker.domain.service.DocumentVerifyStrategy;
 import org.springframework.stereotype.Service;
 
 @Service
