@@ -3,6 +3,7 @@ package com.example.digitalsignchecker.domain.model;
 import com.example.digitalsignchecker.domain.enums.DocumentStatus;
 import com.example.digitalsignchecker.domain.enums.DocumentType;
 import jakarta.persistence.Basic;
+import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Enumerated;
@@ -12,8 +13,11 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Lob;
+import jakarta.persistence.OneToMany;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 @Entity
@@ -47,6 +51,9 @@ public class Document {
 
     @Column(nullable = false)
     private boolean deleted;
+
+    @OneToMany(mappedBy = "document", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    private List<Signature> signatures = new ArrayList<>();
 
     public Document() {}
 
@@ -89,6 +96,10 @@ public class Document {
 
     public boolean isDeleted() {
         return deleted;
+    }
+
+    public List<Signature> getSignatures() {
+        return signatures;
     }
 
     public void setStatus(DocumentStatus status) {
