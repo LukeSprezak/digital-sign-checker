@@ -5,11 +5,13 @@ import com.example.digitalsignchecker.application.dto.VerifyResultDTO;
 import com.example.digitalsignchecker.domain.enums.DocumentType;
 import com.example.digitalsignchecker.domain.enums.VerifyStatus;
 import com.example.digitalsignchecker.domain.model.Document;
+import com.example.digitalsignchecker.domain.model.Signature;
 import com.example.digitalsignchecker.domain.model.VerifyResult;
 import com.example.digitalsignchecker.domain.service.DocumentVerifyStrategy;
 import com.example.digitalsignchecker.application.service.strategy.PdfVerifyService;
 import com.example.digitalsignchecker.application.service.strategy.XmlVerifyService;
 import com.example.digitalsignchecker.infrastructure.persistence.DocumentRepository;
+import com.example.digitalsignchecker.infrastructure.persistence.SignatureRepository;
 import com.example.digitalsignchecker.infrastructure.persistence.VerifyRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,15 +30,18 @@ public class VerifyDocumentService {
     private static final Logger logger = LoggerFactory.getLogger(VerifyDocumentService.class);
     private final VerifyRepository verifyRepository;
     private final DocumentRepository documentRepository;
+    private final SignatureRepository signatureRepository;
     private final Map<DocumentType, DocumentVerifyStrategy> verifyStrategy;
 
     public VerifyDocumentService(
             VerifyRepository verifyRepository,
             DocumentRepository documentRepository,
+            SignatureRepository signatureRepository,
             List<DocumentVerifyStrategy> strategies
     ) {
         this.verifyRepository = verifyRepository;
         this.documentRepository = documentRepository;
+        this.signatureRepository = signatureRepository;
         this.verifyStrategy = beginStrategy(strategies);
     }
 
@@ -87,7 +92,9 @@ public class VerifyDocumentService {
         logger.error("Verify failed: {}", errorMessage);
 
         updateVerifyStatus(verifyResult, VerifyStatus.ERROR, errorMessage);
-        return VerifyResultDTO.fromEntity(verifyResult);
+        List<Signature> signatures = signatureRepository.findByDocument(verifyResult.getDocument());
+
+        return VerifyResultDTO.fromEntity(verifyResult, signatures);
     }
 
     private Map<DocumentType, DocumentVerifyStrategy> beginStrategy(List<DocumentVerifyStrategy> strategies) {

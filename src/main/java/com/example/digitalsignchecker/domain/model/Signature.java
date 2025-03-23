@@ -2,6 +2,8 @@ package com.example.digitalsignchecker.domain.model;
 
 import jakarta.persistence.*;
 
+import java.time.Instant;
+
 @Entity
 public class Signature {
 
@@ -13,14 +15,20 @@ public class Signature {
     @JoinColumn(name = "document_id", nullable = false)
     private Document document;
 
-    @Column(nullable = false)
     private String signerName;
 
-    @Column(nullable = false)
     private String certificateIssuer;
 
-    @Column(nullable = false)
-    private String signingTime;
+    private Instant signingTime;
+
+    public Signature() {}
+
+    public Signature(Document finalDocument, String signerName, String certificateIssuer, Instant signingTime) {
+        this.document = finalDocument;
+        this.signerName = signerName;
+        this.certificateIssuer = certificateIssuer;
+        this.signingTime = signingTime;
+    }
 
     public Long getId() {
         return id;
@@ -38,8 +46,7 @@ public class Signature {
         return certificateIssuer;
     }
 
-    public String getSigningTime() {
+    public Instant getSigningTime() {
         return signingTime;
     }
 }
-
