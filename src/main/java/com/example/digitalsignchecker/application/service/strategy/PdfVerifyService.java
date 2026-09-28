@@ -11,12 +11,22 @@ import org.springframework.stereotype.Service;
 import org.apache.pdfbox.io.MemoryUsageSetting;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.interactive.digitalsignature.PDSignature;
+import org.bouncycastle.asn1.cms.Attribute;
+import org.bouncycastle.asn1.cms.AttributeTable;
+import org.bouncycastle.asn1.cms.CMSAttributes;
+import org.bouncycastle.asn1.cms.Time;
 import org.bouncycastle.cert.X509CertificateHolder;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
+import org.bouncycastle.cms.CMSException;
+import org.bouncycastle.cms.CMSProcessableByteArray;
 import org.bouncycastle.cms.CMSSignedData;
+import org.bouncycastle.cms.SignerInformation;
+import org.bouncycastle.cms.jcajce.JcaSimpleSignerInfoVerifierBuilder;
+import org.bouncycastle.operator.OperatorCreationException;
 import org.bouncycastle.util.Store;
 
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.security.cert.*;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -44,77 +54,108 @@ public class PdfVerifyService implements DocumentVerifyStrategy {
         }
 
         List<SignatureDTO> signatureDTOs = new ArrayList<>();
-        boolean partialSignature = false;
-        String validationMessage = "The document contains a valid PAdES signature.";
 
         try (PDDocument document = PDDocument.load(new ByteArrayInputStream(documentBytes), MemoryUsageSetting.setupMainMemoryOnly())) {
-            List<PDSignature> signatures = document.getSignatureDictionaries();
+            List<PDSignature> signatures = document.getSignatureDictionaries().stream()
+                    .filter(this::isPadesSignature)
+                    .toList();
 
             if (signatures.isEmpty()) {
                 return VerifyResultDTO.fromVerification(false, "The document does NOT contain a PAdES signature.", signatureDTOs);
             }
 
+            List<String> problems = new ArrayList<>();
+            // Earlier signatures legitimately cover only a prefix of the file (incremental updates),
+            // so it is enough that one of them covers the whole document.
+            boolean entireDocumentSigned = false;
+
             for (PDSignature signature : signatures) {
-                if (!isPadesSignature(signature)) continue;
-
-                byte[] signatureContent = signature.getContents(new ByteArrayInputStream(documentBytes));
-                if (signatureContent == null || signatureContent.length == 0) continue;
-
-                CMSSignedData signedData;
-                try {
-                    signedData = new CMSSignedData(signatureContent);
-                } catch (Exception exception) {
-                    logger.error("Signature validation error: {}", exception.getMessage());
-                    return VerifyResultDTO.fromVerification(false, "Signature validation error: " + exception.getMessage(), signatureDTOs);
-                }
-
-                Store<X509CertificateHolder> certsStore = signedData.getCertificates();
-                Collection<X509CertificateHolder> certificateHolders = certsStore.getMatches(null);
-                JcaX509CertificateConverter certificateConverter = new JcaX509CertificateConverter();
-
-                for (X509CertificateHolder holder : certificateHolders) {
-                    X509Certificate cert;
-                    try {
-                        cert = certificateConverter.getCertificate(holder);
-                    } catch (Exception exception) {
-                        logger.warn("Failed to convert certificate: {}", exception.getMessage());
-                        continue;
-                    }
-
-                    String signerName = cert.getSubjectX500Principal().getName();
-                    String certificateIssuer = cert.getIssuerX500Principal().getName();
-                    Instant signingTime = signature.getSignDate() != null ? signature.getSignDate().toInstant() : null;
-                    boolean isCompleteDocumentSigned = isEntireDocumentSigned(signature, documentBytes);
-
-                    CertificateValidityStatus validityStatus = getCertificateValidityStatus(cert);
-                    String validityMessage = switch (validityStatus) {
-                        case VALID -> "";
-                        case EXPIRED -> "The document contains a PAdES signature, but the signature certificate has expired.";
-                        case NOT_YET_VALID -> "The document contains a PAdES signature, but the signature certificate is not yet valid.";
-                    };
-
-                    if (!isCompleteDocumentSigned) {
-                        partialSignature = true;
-                    }
-                    if (!validityMessage.isEmpty()) {
-                        validationMessage = validityMessage;
-                    }
-
-                    signatureDTOs.add(new SignatureDTO(signerName, certificateIssuer, signingTime));
-
-                    return VerifyResultDTO.fromVerification(
-                            true,
-                            validationMessage + (partialSignature ? " (Note: the signature does NOT cover the entire document)." : ""),
-                            signatureDTOs
-                    );
-                }
+                entireDocumentSigned |= isEntireDocumentSigned(signature, documentBytes);
+                verifySignature(signature, documentBytes, signatureDTOs, problems);
             }
+
+            if (!entireDocumentSigned) {
+                problems.add("the signatures do NOT cover the entire document");
+            }
+
+            if (problems.isEmpty()) {
+                return VerifyResultDTO.fromVerification(true, "The document contains a valid PAdES signature.", signatureDTOs);
+            }
+
+            return VerifyResultDTO.fromVerification(
+                    false,
+                    "The document contains an invalid PAdES signature: " + String.join("; ", problems) + ".",
+                    signatureDTOs
+            );
         } catch (Exception exception) {
             logger.error("Document validation error: {}", exception.getMessage());
             return VerifyResultDTO.fromVerification(false, "Validation error: " + exception.getMessage(), signatureDTOs);
         }
+    }
 
-        return VerifyResultDTO.fromVerification(false, "The document does NOT contain a valid PAdES signature.", signatureDTOs);
+    private void verifySignature(
+            PDSignature signature,
+            byte[] documentBytes,
+            List<SignatureDTO> signatureDTOs,
+            List<String> problems
+    ) throws IOException, CertificateException {
+
+        CMSSignedData signedData;
+        try {
+            signedData = new CMSSignedData(
+                    new CMSProcessableByteArray(signature.getSignedContent(documentBytes)),
+                    signature.getContents(documentBytes)
+            );
+        } catch (CMSException exception) {
+            problems.add("malformed signature: " + exception.getMessage());
+            return;
+        }
+
+        Store<X509CertificateHolder> certificates = signedData.getCertificates();
+
+        for (SignerInformation signer : signedData.getSignerInfos().getSigners()) {
+            Collection<X509CertificateHolder> matches = certificates.getMatches(signer.getSID());
+            if (matches.isEmpty()) {
+                problems.add("the signer certificate is missing");
+                continue;
+            }
+
+            X509CertificateHolder holder = matches.iterator().next();
+            X509Certificate cert = new JcaX509CertificateConverter().getCertificate(holder);
+            String signerName = cert.getSubjectX500Principal().getName();
+
+            signatureDTOs.add(new SignatureDTO(
+                    signerName,
+                    cert.getIssuerX500Principal().getName(),
+                    getSigningTime(signer, signature)
+            ));
+
+            try {
+                if (!signer.verify(new JcaSimpleSignerInfoVerifierBuilder().build(holder))) {
+                    problems.add("the signature of " + signerName + " does not match the document content");
+                }
+            } catch (CMSException | OperatorCreationException | CertificateException exception) {
+                problems.add("the signature of " + signerName + " could not be verified: " + exception.getMessage());
+            }
+
+            switch (getCertificateValidityStatus(cert)) {
+                case VALID -> {}
+                case EXPIRED -> problems.add("the certificate of " + signerName + " has expired");
+                case NOT_YET_VALID -> problems.add("the certificate of " + signerName + " is not yet valid");
+            }
+        }
+    }
+
+    // PAdES baseline forbids the CMS signing-time attribute and uses /M instead, so both sources are legitimate.
+    private Instant getSigningTime(SignerInformation signer, PDSignature signature) {
+        AttributeTable signedAttributes = signer.getSignedAttributes();
+        Attribute signingTime = signedAttributes != null ? signedAttributes.get(CMSAttributes.signingTime) : null;
+
+        if (signingTime != null) {
+            return Time.getInstance(signingTime.getAttrValues().getObjectAt(0)).getDate().toInstant();
+        }
+
+        return signature.getSignDate() != null ? signature.getSignDate().toInstant() : null;
     }
 
     private boolean isPadesSignature(PDSignature signature) {

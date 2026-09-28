@@ -1,7 +1,7 @@
 package com.example.digitalsignchecker.ui.controller;
 
+import com.example.digitalsignchecker.application.dto.VerifyResultDTO;
 import com.example.digitalsignchecker.application.service.VerifyResultService;
-import com.example.digitalsignchecker.domain.model.VerifyResult;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -21,7 +21,7 @@ public class VerifyResultController {
     }
 
     @GetMapping
-    public ResponseEntity<List<VerifyResult>> getAllVerifiedResults() {
+    public ResponseEntity<List<VerifyResultDTO>> getAllVerifiedResults() {
         return ResponseEntity.ok(verifyResultService.getAllVerifiedResults());
     }
 }
