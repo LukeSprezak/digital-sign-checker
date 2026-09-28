@@ -11,10 +11,12 @@ import org.apache.pdfbox.cos.COSName;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.apache.pdfbox.io.MemoryUsageSetting;
+import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.interactive.digitalsignature.PDSignature;
+import org.bouncycastle.asn1.ASN1InputStream;
 import org.bouncycastle.asn1.cms.Attribute;
+import org.bouncycastle.asn1.cms.ContentInfo;
 import org.bouncycastle.asn1.cms.AttributeTable;
 import org.bouncycastle.asn1.cms.CMSAttributes;
 import org.bouncycastle.asn1.cms.Time;
@@ -34,7 +36,6 @@ import org.bouncycastle.tsp.TimeStampToken;
 import org.bouncycastle.tsp.TimeStampTokenInfo;
 import org.bouncycastle.util.Store;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.security.cert.*;
 import java.time.Instant;
@@ -79,7 +80,7 @@ public class PdfVerifyService implements DocumentVerifyStrategy {
 
         List<SignatureDTO> signatureDTOs = new ArrayList<>();
 
-        try (PDDocument document = PDDocument.load(new ByteArrayInputStream(documentBytes), MemoryUsageSetting.setupMainMemoryOnly())) {
+        try (PDDocument document = Loader.loadPDF(documentBytes)) {
             List<PDSignature> signatures = document.getSignatureDictionaries().stream()
                     .filter(this::isPadesSignature)
                     .toList();
@@ -137,9 +138,9 @@ public class PdfVerifyService implements DocumentVerifyStrategy {
         try {
             signedData = new CMSSignedData(
                     new CMSProcessableByteArray(signature.getSignedContent(documentBytes)),
-                    signature.getContents(documentBytes)
+                    readContentInfo(signature.getContents(documentBytes))
             );
-        } catch (CMSException exception) {
+        } catch (CMSException | IOException | IllegalArgumentException exception) {
             problems.add("malformed signature: " + exception.getMessage());
             return;
         }
@@ -190,8 +191,8 @@ public class PdfVerifyService implements DocumentVerifyStrategy {
 
         TimeStampToken token;
         try {
-            token = new TimeStampToken(new CMSSignedData(signature.getContents(documentBytes)));
-        } catch (CMSException | TSPException exception) {
+            token = new TimeStampToken(new CMSSignedData(readContentInfo(signature.getContents(documentBytes))));
+        } catch (CMSException | TSPException | IOException | IllegalArgumentException exception) {
             problems.add("malformed document timestamp: " + exception.getMessage());
             return;
         }
@@ -224,6 +225,14 @@ public class PdfVerifyService implements DocumentVerifyStrategy {
     }
 
     // PAdES baseline forbids the CMS signing-time attribute and uses /M instead, so both sources are legitimate.
+    // /Contents is zero-padded to the size reserved when signing, and current BouncyCastle rejects
+    // data after the encoded object, so only the first ASN.1 object is read.
+    private ContentInfo readContentInfo(byte[] contents) throws IOException {
+        try (ASN1InputStream input = new ASN1InputStream(contents)) {
+            return ContentInfo.getInstance(input.readObject());
+        }
+    }
+
     private Instant getSigningTime(SignerInformation signer, PDSignature signature) {
         AttributeTable signedAttributes = signer.getSignedAttributes();
         Attribute signingTime = signedAttributes != null ? signedAttributes.get(CMSAttributes.signingTime) : null;

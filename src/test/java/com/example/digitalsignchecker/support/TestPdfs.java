@@ -3,6 +3,7 @@ package com.example.digitalsignchecker.support;
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.interactive.digitalsignature.PDSignature;
@@ -165,7 +166,7 @@ public final class TestPdfs {
     }
 
     public static byte[] addSignature(byte[] pdf, PDSignature signature, SignatureInterface signing) throws IOException {
-        try (PDDocument document = PDDocument.load(pdf)) {
+        try (PDDocument document = Loader.loadPDF(pdf)) {
             document.addSignature(signature, signing);
 
             ByteArrayOutputStream out = new ByteArrayOutputStream();
