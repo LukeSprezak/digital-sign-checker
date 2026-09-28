@@ -1,12 +1,10 @@
 package com.example.digitalsignchecker.application.command.handler;
 
 import com.example.digitalsignchecker.application.command.VerifyDocumentCommand;
-import com.example.digitalsignchecker.application.dto.VerifyResultDTO;
 import com.example.digitalsignchecker.application.service.VerifyDocumentService;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
-
-import java.util.concurrent.CompletableFuture;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 @Service
 public class VerifyDocumentHandler {
@@ -17,8 +15,10 @@ public class VerifyDocumentHandler {
         this.verifyDocumentService = verifyDocumentService;
     }
 
+    // Runs after the upload transaction commits, so the document is visible to the worker thread.
     @Async
-    public CompletableFuture<VerifyResultDTO> handle(VerifyDocumentCommand command) {
-        return verifyDocumentService.verifyDocument(command);
+    @TransactionalEventListener
+    public void handle(VerifyDocumentCommand command) {
+        verifyDocumentService.verifyDocument(command);
     }
 }

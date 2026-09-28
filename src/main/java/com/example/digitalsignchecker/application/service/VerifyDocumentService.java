@@ -2,8 +2,11 @@ package com.example.digitalsignchecker.application.service;
 
 import com.example.digitalsignchecker.application.command.VerifyDocumentCommand;
 import com.example.digitalsignchecker.application.dto.VerifyResultDTO;
+import com.example.digitalsignchecker.domain.enums.DocumentStatus;
 import com.example.digitalsignchecker.domain.enums.DocumentType;
 import com.example.digitalsignchecker.domain.enums.VerifyStatus;
+import com.example.digitalsignchecker.domain.exception.DocumentNotFoundException;
+import com.example.digitalsignchecker.domain.exception.VerificationNotFoundException;
 import com.example.digitalsignchecker.domain.model.Document;
 import com.example.digitalsignchecker.domain.model.Signature;
 import com.example.digitalsignchecker.domain.model.VerifyResult;
@@ -15,13 +18,10 @@ import com.example.digitalsignchecker.infrastructure.persistence.SignatureReposi
 import com.example.digitalsignchecker.infrastructure.persistence.VerifyRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 @Service
@@ -45,25 +45,21 @@ public class VerifyDocumentService {
         this.verifyStrategy = beginStrategy(strategies);
     }
 
-    @Async
-    public CompletableFuture<VerifyResultDTO> verifyDocument(VerifyDocumentCommand command) {
-        UUID documentId = command.uuid();
-        Document document = documentRepository.findByUuid(documentId)
-                .orElseThrow(() -> new IllegalArgumentException("Document not found with id: " + documentId));
+    public void verifyDocument(VerifyDocumentCommand command) {
+        Document document = documentRepository.findByUuid(command.uuid())
+                .orElseThrow(() -> new DocumentNotFoundException("Document not found with id: " + command.uuid()));
+        VerifyResult verifyResult = verifyRepository.findFirstByDocumentOrderByIdDesc(document)
+                .orElseThrow(() -> new VerificationNotFoundException("Verification result not found for document: " + command.uuid()));
 
-        VerifyResult verifyResult = saveInitialVerify(document);
-
-        return CompletableFuture
-                .supplyAsync(() -> processVerify(command, verifyResult))
-                .exceptionally(exception -> handleVerifyError(verifyResult, exception));
+        try {
+            processVerify(command, document, verifyResult);
+        } catch (Exception exception) {
+            logger.error("Verify failed for document {}", command.uuid(), exception);
+            finishVerify(document, verifyResult, VerifyStatus.ERROR, "ERROR: " + exception.getMessage());
+        }
     }
 
-    private VerifyResult saveInitialVerify(Document document) {
-        VerifyResult verifyResult = new VerifyResult(document, VerifyStatus.PENDING, false, "Begin processing");
-        return verifyRepository.save(verifyResult);
-    }
-
-    private VerifyResultDTO processVerify(VerifyDocumentCommand command, VerifyResult verifyResult) {
+    private void processVerify(VerifyDocumentCommand command, Document document, VerifyResult verifyResult) {
         DocumentVerifyStrategy strategy = verifyStrategy.get(command.type());
         if (strategy == null) {
             throw new IllegalArgumentException("Unsupported document type: " + command.type());
@@ -72,12 +68,24 @@ public class VerifyDocumentService {
         updateVerifyStatus(verifyResult, VerifyStatus.IN_PROGRESS, "Verify in progress");
 
         VerifyResultDTO resultDTO = strategy.verifyDocument(command.data());
+
+        signatureRepository.saveAll(resultDTO.signatures().stream()
+                .map(dto -> new Signature(document, dto.signerName(), dto.certificateIssuer(), dto.signingTime()))
+                .toList());
+
         VerifyStatus finalStatus = resultDTO.verified()
                 ? VerifyStatus.COMPLETED
                 : VerifyStatus.ERROR;
 
-        updateVerifyStatus(verifyResult, finalStatus, resultDTO.message());
-        return resultDTO;
+        finishVerify(document, verifyResult, finalStatus, resultDTO.message());
+    }
+
+    private void finishVerify(Document document, VerifyResult verifyResult, VerifyStatus status, String message) {
+        updateVerifyStatus(verifyResult, status, message);
+
+        document.setDeleted(true);
+        document.setStatus(status == VerifyStatus.COMPLETED ? DocumentStatus.VERIFIED : DocumentStatus.ERROR);
+        documentRepository.save(document);
     }
 
     private void updateVerifyStatus(VerifyResult verifyResult, VerifyStatus status, String message) {
@@ -85,16 +93,6 @@ public class VerifyDocumentService {
             verifyResult.updateStatus(status, status == VerifyStatus.COMPLETED, message);
             verifyRepository.save(verifyResult);
         }
-    }
-
-    private VerifyResultDTO handleVerifyError(VerifyResult verifyResult, Throwable exception) {
-        String errorMessage = "ERROR: " + (exception.getMessage() != null ? exception.getMessage() : "Unknown error");
-        logger.error("Verify failed: {}", errorMessage);
-
-        updateVerifyStatus(verifyResult, VerifyStatus.ERROR, errorMessage);
-        List<Signature> signatures = signatureRepository.findByDocument(verifyResult.getDocument());
-
-        return VerifyResultDTO.fromEntity(verifyResult, signatures);
     }
 
     private Map<DocumentType, DocumentVerifyStrategy> beginStrategy(List<DocumentVerifyStrategy> strategies) {

@@ -14,7 +14,7 @@ import java.util.UUID;
 @Repository
 public interface VerifyRepository extends JpaRepository<VerifyResult, Long> {
 
-    Optional<VerifyResult> findByDocument(Document document);
+    Optional<VerifyResult> findFirstByDocumentOrderByIdDesc(Document document);
     List<VerifyResult> findAllByStatusIn(Collection<VerifyStatus> status);
     default List<VerifyResult> findAllVerified() {
         return findAllByStatusIn(List.of(VerifyStatus.COMPLETED, VerifyStatus.ERROR));

@@ -11,7 +11,6 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 
 @RestController
 @RequestMapping(path = "/api/documents", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -23,14 +22,15 @@ public class DocumentController {
         this.documentService = documentService;
     }
 
-    @PutMapping("/status/{uuid}")
+    @GetMapping("/status/{uuid}")
     public ResponseEntity<VerifyResultDTO> getVerifyResultForSignature(@PathVariable UUID uuid) {
         return ResponseEntity.ok(documentService.getVerifyResult(uuid));
     }
 
     @PostMapping("/upload")
-    public CompletableFuture<ResponseEntity<Map<String, URI>>> uploadDocumentToVerified(
+    public ResponseEntity<Map<String, URI>> uploadDocumentToVerified(
             @RequestParam("file") MultipartFile file) throws IOException {
-        return documentService.uploadDocument(file).thenApply(ResponseEntity::ok);
+        URI location = documentService.uploadDocument(file);
+        return ResponseEntity.accepted().location(location).body(Map.of("link", location));
     }
 }

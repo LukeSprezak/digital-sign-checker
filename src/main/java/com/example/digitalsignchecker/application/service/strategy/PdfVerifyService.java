@@ -22,7 +22,12 @@ import org.bouncycastle.cms.CMSProcessableByteArray;
 import org.bouncycastle.cms.CMSSignedData;
 import org.bouncycastle.cms.SignerInformation;
 import org.bouncycastle.cms.jcajce.JcaSimpleSignerInfoVerifierBuilder;
+import org.bouncycastle.operator.DigestCalculator;
 import org.bouncycastle.operator.OperatorCreationException;
+import org.bouncycastle.operator.jcajce.JcaDigestCalculatorProviderBuilder;
+import org.bouncycastle.tsp.TSPException;
+import org.bouncycastle.tsp.TimeStampToken;
+import org.bouncycastle.tsp.TimeStampTokenInfo;
 import org.bouncycastle.util.Store;
 
 import java.io.ByteArrayInputStream;
@@ -30,6 +35,7 @@ import java.io.IOException;
 import java.security.cert.*;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
@@ -39,11 +45,13 @@ public class PdfVerifyService implements DocumentVerifyStrategy {
 
     private static final Logger logger = LoggerFactory.getLogger(PdfVerifyService.class);
 
+    private static final COSName DOCUMENT_TIMESTAMP_SUBFILTER = COSName.getPDFName("ETSI.RFC3161");
+
     private static final Set<COSName> VALID_PADES_SUBFILTERS = Set.of(
-            COSName.ADBE_X509_RSA_SHA1,
             COSName.ADBE_PKCS7_DETACHED,
             COSName.getPDFName("ETSI.CAdES.detached"),
-            COSName.ADBE_PKCS7_SHA1
+            COSName.ADBE_PKCS7_SHA1,
+            DOCUMENT_TIMESTAMP_SUBFILTER
     );
 
     @Override
@@ -71,7 +79,11 @@ public class PdfVerifyService implements DocumentVerifyStrategy {
 
             for (PDSignature signature : signatures) {
                 entireDocumentSigned |= isEntireDocumentSigned(signature, documentBytes);
-                verifySignature(signature, documentBytes, signatureDTOs, problems);
+                if (DOCUMENT_TIMESTAMP_SUBFILTER.getName().equals(signature.getSubFilter())) {
+                    verifyDocumentTimestamp(signature, documentBytes, signatureDTOs, problems);
+                } else {
+                    verifySignature(signature, documentBytes, signatureDTOs, problems);
+                }
             }
 
             if (!entireDocumentSigned) {
@@ -143,6 +155,48 @@ public class PdfVerifyService implements DocumentVerifyStrategy {
                 case EXPIRED -> problems.add("the certificate of " + signerName + " has expired");
                 case NOT_YET_VALID -> problems.add("the certificate of " + signerName + " is not yet valid");
             }
+        }
+    }
+
+    private void verifyDocumentTimestamp(
+            PDSignature signature,
+            byte[] documentBytes,
+            List<SignatureDTO> signatureDTOs,
+            List<String> problems
+    ) throws IOException, CertificateException {
+
+        TimeStampToken token;
+        try {
+            token = new TimeStampToken(new CMSSignedData(signature.getContents(documentBytes)));
+        } catch (CMSException | TSPException exception) {
+            problems.add("malformed document timestamp: " + exception.getMessage());
+            return;
+        }
+
+        Collection<X509CertificateHolder> matches = token.getCertificates().getMatches(token.getSID());
+        if (matches.isEmpty()) {
+            problems.add("the timestamp authority certificate is missing");
+            return;
+        }
+
+        X509CertificateHolder holder = matches.iterator().next();
+        X509Certificate cert = new JcaX509CertificateConverter().getCertificate(holder);
+        String tsaName = cert.getSubjectX500Principal().getName();
+        TimeStampTokenInfo info = token.getTimeStampInfo();
+
+        signatureDTOs.add(new SignatureDTO(tsaName, cert.getIssuerX500Principal().getName(), info.getGenTime().toInstant()));
+
+        try {
+            token.validate(new JcaSimpleSignerInfoVerifierBuilder().build(holder));
+
+            DigestCalculator digestCalculator = new JcaDigestCalculatorProviderBuilder().build().get(info.getHashAlgorithm());
+            digestCalculator.getOutputStream().write(signature.getSignedContent(documentBytes));
+
+            if (!Arrays.equals(digestCalculator.getDigest(), info.getMessageImprintDigest())) {
+                problems.add("the document timestamp of " + tsaName + " does not match the document content");
+            }
+        } catch (TSPException | OperatorCreationException | CertificateException exception) {
+            problems.add("the document timestamp of " + tsaName + " could not be verified: " + exception.getMessage());
         }
     }
 
