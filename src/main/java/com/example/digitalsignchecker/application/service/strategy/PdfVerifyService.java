@@ -1,9 +1,12 @@
 package com.example.digitalsignchecker.application.service.strategy;
 
 import com.example.digitalsignchecker.application.dto.SignatureDTO;
-import com.example.digitalsignchecker.application.dto.VerifyResultDTO;
+import com.example.digitalsignchecker.application.dto.VerificationOutcome;
 import com.example.digitalsignchecker.domain.enums.CertificateValidityStatus;
+import com.example.digitalsignchecker.domain.enums.DocumentType;
 import com.example.digitalsignchecker.domain.service.DocumentVerifyStrategy;
+import org.apache.pdfbox.cos.COSArray;
+import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.cos.COSName;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,6 +49,13 @@ public class PdfVerifyService implements DocumentVerifyStrategy {
     private static final Logger logger = LoggerFactory.getLogger(PdfVerifyService.class);
 
     private static final COSName DOCUMENT_TIMESTAMP_SUBFILTER = COSName.getPDFName("ETSI.RFC3161");
+    private static final COSName REFERENCE = COSName.getPDFName("Reference");
+    private static final COSName TRANSFORM_METHOD = COSName.getPDFName("TransformMethod");
+    private static final COSName TRANSFORM_PARAMS = COSName.getPDFName("TransformParams");
+    private static final COSName DOC_MDP = COSName.getPDFName("DocMDP");
+    private static final COSName PERMISSION = COSName.getPDFName("P");
+    // ISO 32000-1, 12.8.2.2: P defaults to 2 when absent.
+    private static final int DEFAULT_DOC_MDP_PERMISSION = 2;
 
     private static final Set<COSName> VALID_PADES_SUBFILTERS = Set.of(
             COSName.ADBE_PKCS7_DETACHED,
@@ -55,10 +65,15 @@ public class PdfVerifyService implements DocumentVerifyStrategy {
     );
 
     @Override
-    public VerifyResultDTO verifyDocument(byte[] documentBytes) {
+    public DocumentType supportedType() {
+        return DocumentType.PDF;
+    }
+
+    @Override
+    public VerificationOutcome verifyDocument(byte[] documentBytes) {
 
         if (documentBytes == null || documentBytes.length == 0) {
-            return VerifyResultDTO.fromVerification(false, "The document data is empty.", List.of());
+            return new VerificationOutcome(false, "The document data is empty.", List.of());
         }
 
         List<SignatureDTO> signatureDTOs = new ArrayList<>();
@@ -69,7 +84,7 @@ public class PdfVerifyService implements DocumentVerifyStrategy {
                     .toList();
 
             if (signatures.isEmpty()) {
-                return VerifyResultDTO.fromVerification(false, "The document does NOT contain a PAdES signature.", signatureDTOs);
+                return new VerificationOutcome(false, "The document does NOT contain a PAdES signature.", signatureDTOs);
             }
 
             List<String> problems = new ArrayList<>();
@@ -78,7 +93,12 @@ public class PdfVerifyService implements DocumentVerifyStrategy {
             boolean entireDocumentSigned = false;
 
             for (PDSignature signature : signatures) {
-                entireDocumentSigned |= isEntireDocumentSigned(signature, documentBytes);
+                boolean coversEntireDocument = isEntireDocumentSigned(signature, documentBytes);
+                entireDocumentSigned |= coversEntireDocument;
+                if (!coversEntireDocument && forbidsChangesAfterSigning(signature)) {
+                    problems.add("the document was modified after a certification signature that forbids any changes");
+                }
+
                 if (DOCUMENT_TIMESTAMP_SUBFILTER.getName().equals(signature.getSubFilter())) {
                     verifyDocumentTimestamp(signature, documentBytes, signatureDTOs, problems);
                 } else {
@@ -91,17 +111,17 @@ public class PdfVerifyService implements DocumentVerifyStrategy {
             }
 
             if (problems.isEmpty()) {
-                return VerifyResultDTO.fromVerification(true, "The document contains a valid PAdES signature.", signatureDTOs);
+                return new VerificationOutcome(true, "The document contains a valid PAdES signature.", signatureDTOs);
             }
 
-            return VerifyResultDTO.fromVerification(
+            return new VerificationOutcome(
                     false,
                     "The document contains an invalid PAdES signature: " + String.join("; ", problems) + ".",
                     signatureDTOs
             );
         } catch (Exception exception) {
-            logger.error("Document validation error: {}", exception.getMessage());
-            return VerifyResultDTO.fromVerification(false, "Validation error: " + exception.getMessage(), signatureDTOs);
+            logger.error("Document validation error", exception);
+            return new VerificationOutcome(false, "Validation error: " + exception.getMessage(), signatureDTOs);
         }
     }
 
@@ -227,12 +247,30 @@ public class PdfVerifyService implements DocumentVerifyStrategy {
         return false;
     }
 
+    // Only DocMDP P=1 is enforced: P=2/3 allow form filling and annotations,
+    // which would require comparing revisions object by object.
+    private boolean forbidsChangesAfterSigning(PDSignature signature) {
+        if (!(signature.getCOSObject().getDictionaryObject(REFERENCE) instanceof COSArray references)) {
+            return false;
+        }
+
+        for (int i = 0; i < references.size(); i++) {
+            if (references.getObject(i) instanceof COSDictionary reference
+                    && DOC_MDP.equals(reference.getCOSName(TRANSFORM_METHOD))
+                    && reference.getDictionaryObject(TRANSFORM_PARAMS) instanceof COSDictionary params) {
+                return params.getInt(PERMISSION, DEFAULT_DOC_MDP_PERMISSION) == 1;
+            }
+        }
+
+        return false;
+    }
+
     private boolean isEntireDocumentSigned(PDSignature signature, byte[] documentBytes) {
         try {
             int[] byteRange = signature.getByteRange();
             return byteRange != null && byteRange.length == 4 && (byteRange[2] + byteRange[3]) == documentBytes.length;
         } catch (Exception exception) {
-            logger.warn("Signature range could not be verified: {}", exception.getMessage());
+            logger.warn("Signature range could not be verified", exception);
             return false;
         }
     }

@@ -1,18 +1,15 @@
 package com.example.digitalsignchecker.application.service;
 
 import com.example.digitalsignchecker.application.command.VerifyDocumentCommand;
-import com.example.digitalsignchecker.application.dto.VerifyResultDTO;
+import com.example.digitalsignchecker.application.dto.VerificationOutcome;
 import com.example.digitalsignchecker.domain.enums.DocumentStatus;
 import com.example.digitalsignchecker.domain.enums.DocumentType;
 import com.example.digitalsignchecker.domain.enums.VerifyStatus;
-import com.example.digitalsignchecker.domain.exception.DocumentNotFoundException;
 import com.example.digitalsignchecker.domain.exception.VerificationNotFoundException;
 import com.example.digitalsignchecker.domain.model.Document;
 import com.example.digitalsignchecker.domain.model.Signature;
 import com.example.digitalsignchecker.domain.model.VerifyResult;
 import com.example.digitalsignchecker.domain.service.DocumentVerifyStrategy;
-import com.example.digitalsignchecker.application.service.strategy.PdfVerifyService;
-import com.example.digitalsignchecker.application.service.strategy.XmlVerifyService;
 import com.example.digitalsignchecker.infrastructure.persistence.DocumentRepository;
 import com.example.digitalsignchecker.infrastructure.persistence.SignatureRepository;
 import com.example.digitalsignchecker.infrastructure.persistence.VerifyRepository;
@@ -22,6 +19,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
@@ -42,50 +40,50 @@ public class VerifyDocumentService {
         this.verifyRepository = verifyRepository;
         this.documentRepository = documentRepository;
         this.signatureRepository = signatureRepository;
-        this.verifyStrategy = beginStrategy(strategies);
+        this.verifyStrategy = strategies.stream()
+                .collect(Collectors.toMap(DocumentVerifyStrategy::supportedType, Function.identity()));
     }
 
     public void verifyDocument(VerifyDocumentCommand command) {
-        Document document = documentRepository.findByUuid(command.uuid())
-                .orElseThrow(() -> new DocumentNotFoundException("Document not found with id: " + command.uuid()));
-        VerifyResult verifyResult = verifyRepository.findFirstByDocumentOrderByIdDesc(document)
-                .orElseThrow(() -> new VerificationNotFoundException("Verification result not found for document: " + command.uuid()));
+        VerifyResult verifyResult = verifyRepository.findFirstByDocumentIdOrderByIdDesc(command.documentId())
+                .orElseThrow(() -> new VerificationNotFoundException("Verification result not found for document: " + command.documentId()));
 
         try {
-            processVerify(command, document, verifyResult);
+            processVerify(command, verifyResult);
         } catch (Exception exception) {
-            logger.error("Verify failed for document {}", command.uuid(), exception);
-            finishVerify(document, verifyResult, VerifyStatus.ERROR, "ERROR: " + exception.getMessage());
+            logger.error("Verify failed for document {}", command.documentId(), exception);
+            finishVerify(command.documentId(), verifyResult, VerifyStatus.ERROR, "ERROR: " + exception.getMessage());
         }
     }
 
-    private void processVerify(VerifyDocumentCommand command, Document document, VerifyResult verifyResult) {
+    private void processVerify(VerifyDocumentCommand command, VerifyResult verifyResult) {
         DocumentVerifyStrategy strategy = verifyStrategy.get(command.type());
-        if (strategy == null) {
-            throw new IllegalArgumentException("Unsupported document type: " + command.type());
-        }
 
         updateVerifyStatus(verifyResult, VerifyStatus.IN_PROGRESS, "Verify in progress");
 
-        VerifyResultDTO resultDTO = strategy.verifyDocument(command.data());
+        VerificationOutcome outcome = strategy.verifyDocument(command.data());
 
-        signatureRepository.saveAll(resultDTO.signatures().stream()
+        Document document = documentRepository.getReferenceById(command.documentId());
+        signatureRepository.saveAll(outcome.signatures().stream()
                 .map(dto -> new Signature(document, dto.signerName(), dto.certificateIssuer(), dto.signingTime()))
                 .toList());
 
-        VerifyStatus finalStatus = resultDTO.verified()
+        VerifyStatus finalStatus = outcome.verified()
                 ? VerifyStatus.COMPLETED
-                : VerifyStatus.ERROR;
+                : VerifyStatus.INVALID;
 
-        finishVerify(document, verifyResult, finalStatus, resultDTO.message());
+        finishVerify(command.documentId(), verifyResult, finalStatus, outcome.message());
     }
 
-    private void finishVerify(Document document, VerifyResult verifyResult, VerifyStatus status, String message) {
+    private void finishVerify(Long documentId, VerifyResult verifyResult, VerifyStatus status, String message) {
         updateVerifyStatus(verifyResult, status, message);
 
-        document.setDeleted(true);
-        document.setStatus(status == VerifyStatus.COMPLETED ? DocumentStatus.VERIFIED : DocumentStatus.ERROR);
-        documentRepository.save(document);
+        documentRepository.finishVerification(documentId, switch (status) {
+            case COMPLETED -> DocumentStatus.VERIFIED;
+            case INVALID -> DocumentStatus.INVALID;
+            case ERROR -> DocumentStatus.ERROR;
+            case PENDING, IN_PROGRESS -> throw new IllegalStateException("Verification is not finished: " + status);
+        });
     }
 
     private void updateVerifyStatus(VerifyResult verifyResult, VerifyStatus status, String message) {
@@ -93,18 +91,5 @@ public class VerifyDocumentService {
             verifyResult.updateStatus(status, status == VerifyStatus.COMPLETED, message);
             verifyRepository.save(verifyResult);
         }
-    }
-
-    private Map<DocumentType, DocumentVerifyStrategy> beginStrategy(List<DocumentVerifyStrategy> strategies) {
-        return strategies.stream()
-                .collect(Collectors.toMap(this::strategyDocumentType, strategy -> strategy));
-    }
-
-    private DocumentType strategyDocumentType(DocumentVerifyStrategy strategy) {
-        return switch (strategy) {
-            case PdfVerifyService ignored -> DocumentType.PDF;
-            case XmlVerifyService ignored -> DocumentType.XML;
-            default -> throw new IllegalArgumentException("Unknown verify strategy: " + strategy.getClass());
-        };
     }
 }

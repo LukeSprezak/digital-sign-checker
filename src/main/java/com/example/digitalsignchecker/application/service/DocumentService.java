@@ -5,7 +5,6 @@ import com.example.digitalsignchecker.application.dto.VerifyResultDTO;
 import com.example.digitalsignchecker.domain.enums.DocumentType;
 import com.example.digitalsignchecker.domain.enums.VerifyStatus;
 import com.example.digitalsignchecker.domain.exception.DocumentNotFoundException;
-import com.example.digitalsignchecker.domain.exception.VerificationNotFoundException;
 import com.example.digitalsignchecker.domain.model.Document;
 import com.example.digitalsignchecker.domain.model.Signature;
 import com.example.digitalsignchecker.domain.model.VerifyResult;
@@ -46,16 +45,14 @@ public class DocumentService {
         this.eventPublisher = eventPublisher;
     }
 
+    // Queries by document UUID so the LONGBLOB content is never loaded for a status check.
     @Transactional(readOnly = true)
     public VerifyResultDTO getVerifyResult(UUID uuid) {
 
-        Document document = documentRepository.findByUuid(uuid)
+        VerifyResult verifyResult = verificationRepository.findFirstByDocumentUuidOrderByIdDesc(uuid)
                 .orElseThrow(() -> new DocumentNotFoundException("Document not found"));
 
-        VerifyResult verifyResult = verificationRepository.findFirstByDocumentOrderByIdDesc(document)
-                .orElseThrow(() -> new VerificationNotFoundException("Verification result not found"));
-
-        List<Signature> signatures = signatureRepository.findByDocument(document);
+        List<Signature> signatures = signatureRepository.findByDocumentUuid(uuid);
 
         return VerifyResultDTO.fromEntity(verifyResult, signatures);
     }
@@ -78,7 +75,7 @@ public class DocumentService {
         verificationRepository.save(new VerifyResult(document, VerifyStatus.PENDING, false, "Begin processing"));
 
         eventPublisher.publishEvent(new VerifyDocumentCommand(
-                document.getUuid(),
+                document.getId(),
                 document.getType(),
                 document.getContent()
         ));
@@ -116,7 +113,6 @@ public class DocumentService {
         return switch (type) {
             case PDF -> head.contains("%PDF-");
             case XML -> head.replaceFirst("^" + UTF8_BOM, "").stripLeading().startsWith("<");
-            case UNKNOWN -> false;
         };
     }
 }

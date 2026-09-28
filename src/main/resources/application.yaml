@@ -1,5 +1,17 @@
 spring:
-  profiles:
-    active: local
   application:
     name: digital-sign-checker
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 20MB
+
+app:
+  api-key: ${API_KEY}

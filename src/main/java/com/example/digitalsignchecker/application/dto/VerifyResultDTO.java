@@ -31,19 +31,4 @@ public record VerifyResultDTO(
                 signatureDTOs
         );
     }
-
-    public static VerifyResultDTO fromVerification(
-            boolean verified,
-            String message,
-            List<SignatureDTO> signatures
-    ) {
-        return new VerifyResultDTO(
-                UUID.randomUUID(),
-                verified ? VerifyStatus.COMPLETED : VerifyStatus.ERROR,
-                verified,
-                message,
-                Instant.now(),
-                signatures
-        );
-    }
 }
