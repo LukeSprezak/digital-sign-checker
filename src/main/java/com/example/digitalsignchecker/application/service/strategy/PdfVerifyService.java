@@ -23,6 +23,7 @@ import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
 import org.bouncycastle.cms.CMSException;
 import org.bouncycastle.cms.CMSProcessableByteArray;
 import org.bouncycastle.cms.CMSSignedData;
+import org.bouncycastle.cms.CMSSignerDigestMismatchException;
 import org.bouncycastle.cms.SignerInformation;
 import org.bouncycastle.cms.jcajce.JcaSimpleSignerInfoVerifierBuilder;
 import org.bouncycastle.operator.DigestCalculator;
@@ -166,6 +167,8 @@ public class PdfVerifyService implements DocumentVerifyStrategy {
                 if (!signer.verify(new JcaSimpleSignerInfoVerifierBuilder().build(holder))) {
                     problems.add("the signature of " + signerName + " does not match the document content");
                 }
+            } catch (CMSSignerDigestMismatchException exception) {
+                problems.add("the signature of " + signerName + " does not match the document content");
             } catch (CMSException | OperatorCreationException | CertificateException exception) {
                 problems.add("the signature of " + signerName + " could not be verified: " + exception.getMessage());
             }
