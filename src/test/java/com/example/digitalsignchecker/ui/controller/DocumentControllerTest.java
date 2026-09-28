@@ -8,7 +8,7 @@ import com.example.digitalsignchecker.domain.exception.DocumentNotFoundException
 import com.example.digitalsignchecker.infrastructure.security.SecurityConfig;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -87,7 +87,7 @@ class DocumentControllerTest {
         when(documentService.uploadDocument(any())).thenThrow(new MaxUploadSizeExceededException(20L * 1024 * 1024));
 
         mockMvc.perform(multipart("/api/documents/upload").file(PDF).header(API_KEY_HEADER, API_KEY))
-                .andExpect(status().isPayloadTooLarge());
+                .andExpect(status().isContentTooLarge());
     }
 
     @Test
